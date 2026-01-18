@@ -39,8 +39,12 @@ class TestInterruptionLogic(unittest.IsolatedAsyncioTestCase):
         # Mock current speech
         self.mock_speech = MagicMock(spec=SpeechHandle)
         self.mock_speech.interrupted = False
+        self.mock_speech.done.return_value = False
         self.mock_speech.allow_interruptions = True
         self.activity._current_speech = self.mock_speech
+
+        # Mock RT session
+        self.activity._rt_session = MagicMock()
 
     async def test_no_filter_vad_only(self):
         """Test default behavior: VAD with empty transcript interrupts"""
@@ -121,6 +125,56 @@ class TestInterruptionLogic(unittest.IsolatedAsyncioTestCase):
         self.activity._interrupt_by_audio_activity()
 
         self.mock_speech.interrupt.assert_not_called()
+
+    async def test_silent_agent_handling(self):
+        """Test: Agent silent + 'Yeah'. Should NOT trigger interrupt logic (because no speech), but verify logic doesn't crash or block."""
+        logger.info("Test: Silent agent + 'Yeah'")
+        self.mock_options.interruption_speech_filter = ["yeah"]
+        self.mock_audio_recognition.current_transcript = "Yeah"
+        self.activity._current_speech = None # Agent silent
+
+        # This method is called to *interrupt* current speech. If no speech, it does nothing or returns early.
+        # We just want to ensure it doesn't raise error or do something weird.
+        self.activity._interrupt_by_audio_activity()
+
+        # No interrupt called because no speech handle
+        pass
+
+    async def test_space_handling(self):
+        """Test: 'Uh huh' (space) vs filter 'uh-huh'."""
+        logger.info("Test: 'Uh huh' vs filter 'uh-huh'")
+        # If the user only puts 'uh-huh' in filter, 'uh huh' (two words) will fail the check if we rely on strict word matching.
+        # This test documents the behavior: User must add 'uh' and 'huh' OR we need fuzzy matching.
+        # Current logic: strict word match. So this should INTERRUPT.
+
+        self.mock_options.interruption_speech_filter = ["uh-huh"]
+        self.mock_audio_recognition.current_transcript = "Uh huh"
+
+        self.activity._interrupt_by_audio_activity()
+
+        self.mock_speech.interrupt.assert_called()
+
+    async def test_apostrophe_handling(self):
+        """Test: 'It's ok' with filter 'it's', 'ok'."""
+        logger.info("Test: 'It's ok' with filter")
+        self.mock_options.interruption_speech_filter = ["it's", "ok"]
+        self.mock_audio_recognition.current_transcript = "It's ok"
+
+        self.activity._interrupt_by_audio_activity()
+
+        self.mock_speech.interrupt.assert_not_called()
+
+    async def test_silent_agent_vad_only(self):
+        """Test: Agent silent + VAD only. Should NOT return early (filter ignored), so it should reach start_user_activity."""
+        logger.info("Test: Silent agent + VAD only")
+        self.mock_options.interruption_speech_filter = ["yeah"]
+        self.mock_audio_recognition.current_transcript = ""
+        self.activity._current_speech = None # Agent silent
+
+        self.activity._interrupt_by_audio_activity()
+
+        # Verify start_user_activity was called (meaning we didn't return early)
+        self.activity._rt_session.start_user_activity.assert_called()
 
 if __name__ == '__main__':
     unittest.main()

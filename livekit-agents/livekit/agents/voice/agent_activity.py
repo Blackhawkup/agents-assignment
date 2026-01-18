@@ -1182,13 +1182,18 @@ class AgentActivity(RecognitionHooks):
             text = self._audio_recognition.current_transcript
 
             # Check for interruption speech filter
-            if opt.interruption_speech_filter:
+            # Only apply filter if the agent is currently speaking
+            if (
+                opt.interruption_speech_filter
+                and self._current_speech is not None
+                and not self._current_speech.done()
+            ):
                 # If transcript is empty, return (ignore VAD-only interruption)
                 if not text.strip():
                     return
 
-                # Normalize transcript: lowercase and remove punctuation (keep hyphens)
-                normalized_text = re.sub(r'[^\w\s-]', '', text.lower())
+                # Normalize transcript: lowercase and remove punctuation (keep hyphens and apostrophes)
+                normalized_text = re.sub(r"[^\w\s'-]", "", text.lower())
                 words = normalized_text.split()
 
                 # Check if all words are in the ignore list
